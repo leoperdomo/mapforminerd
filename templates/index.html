@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapa de Conectividad de Escuelas</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+        .legend {
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+        }
+        .legend-item {
+            margin: 5px 0;
+            display: flex;
+            align-items: center;
+        }
+        .marker-icon {
+            width: 20px;
+            height: 20px;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        .status-online {
+            color: #00AA00;
+            font-weight: bold;
+        }
+        .status-offline {
+            color: #FF0000;
+            font-weight: bold;
+        }
+        .status-pending {
+            color: #808080;
+            font-weight: bold;
+        }
+        
+        /* Nuevos estilos para el panel de control */
+        .controls-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            z-index: 1000;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .reload-btn {
+            padding: 8px 15px;
+            background: #4a4a4a;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .reload-btn:hover {
+            background: #333;
+        }
+        .reload-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .stats-container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            text-align: center;
+        }
+        .stat-item {
+            background: #f5f5f5;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .stat-value {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+        }
+        .loading {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="controls-panel">
+        <button id="reloadBtn" class="reload-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 12c0-4.4 3.6-8 8-8 3.3 0 6.2 2 7.4 4.8M22 12c0 4.4-3.6 8-8 8-3.3 0-6.2-2-7.4-4.8"/>
+            </svg>
+            Recargar Estados
+        </button>
+        <div class="stats-container">
+            <div class="stat-item">
+                <div class="stat-value" id="totalSchools">0</div>
+                <div class="stat-label">Total</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="onlineSchools">0</div>
+                <div class="stat-label">En línea</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="offlineSchools">0</div>
+                <div class="stat-label">Fuera de línea</div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="map"></div>
+    
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // Inicialización del mapa
+        const map = L.map('map').setView([19.0, -70.0], 8);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Crear íconos personalizados
+        function createCustomIcon(color) {
+            return L.divIcon({
+                className: 'custom-div-icon',
+                html: `
+                    <svg width="30" height="40" viewBox="0 0 30 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M15 0C6.71573 0 0 6.71573 0 15C0 23.2843 15 40 15 40C15 40 30 23.2843 30 15C30 6.71573 23.2843 0 15 0Z" fill="${color}"/>
+                        <circle cx="15" cy="15" r="7" fill="white"/>
+                    </svg>
+                `,
+                iconSize: [30, 40],
+                iconAnchor: [15, 40],
+                popupAnchor: [0, -40]
+            });
+        }
+
+        const grayIcon = createCustomIcon('#808080');
+        const greenIcon = createCustomIcon('#00AA00');
+        const redIcon = createCustomIcon('#FF0000');
+
+        // Agregar leyenda
+        const legend = L.control({position: 'bottomright'});
+        legend.onAdd = function(map) {
+            const div = L.DomUtil.create('div', 'legend');
+            div.innerHTML = `
+                <div class="legend-item">
+                    <svg width="20" height="27" viewBox="0 0 30 40" fill="#808080">
+                        <path d="M15 0C6.71573 0 0 6.71573 0 15C0 23.2843 15 40 15 40C15 40 30 23.2843 30 15C30 6.71573 23.2843 0 15 0Z"/>
+                        <circle cx="15" cy="15" r="7" fill="white"/>
+                    </svg>
+                    Pendiente
+                </div>
+                <div class="legend-item">
+                    <svg width="20" height="27" viewBox="0 0 30 40" fill="#00AA00">
+                        <path d="M15 0C6.71573 0 0 6.71573 0 15C0 23.2843 15 40 15 40C15 40 30 23.2843 30 15C30 6.71573 23.2843 0 15 0Z"/>
+                        <circle cx="15" cy="15" r="7" fill="white"/>
+                    </svg>
+                    En línea
+                </div>
+                <div class="legend-item">
+                    <svg width="20" height="27" viewBox="0 0 30 40" fill="#FF0000">
+                        <path d="M15 0C6.71573 0 0 6.71573 0 15C0 23.2843 15 40 15 40C15 40 30 23.2843 30 15C30 6.71573 23.2843 0 15 0Z"/>
+                        <circle cx="15" cy="15" r="7" fill="white"/>
+                    </svg>
+                    Fuera de línea
+                </div>
+            `;
+            return div;
+        };
+        legend.addTo(map);
+
+        // Almacenar datos y marcadores
+        let markers = {};
+        let schoolsData = {};
+        let isLoading = false;
+
+        function createPopupContent(school, status = 'pending') {
+            const statusClass = status === 'online' ? 'status-online' : 
+                              status === 'offline' ? 'status-offline' : 
+                              'status-pending';
+            const statusText = status === 'online' ? 'En línea' : 
+                             status === 'offline' ? 'Fuera de línea' : 
+                             'Pendiente';
+            
+            return `
+                <b>${school.nombre}</b><br>
+                Código: ${school.codigo}<br>
+                Estado: <span class="${statusClass}">${statusText}</span><br>
+            `;
+        }
+
+        // Actualizar estadísticas
+        function updateStats() {
+            const total = Object.keys(markers).length;
+            let online = 0;
+            let offline = 0;
+
+            Object.values(schoolsData).forEach(school => {
+                if (school.status === 'online') online++;
+                else if (school.status === 'offline') offline++;
+            });
+
+            document.getElementById('totalSchools').textContent = total;
+            document.getElementById('onlineSchools').textContent = online;
+            document.getElementById('offlineSchools').textContent = offline;
+        }
+
+        // Cargar marcadores iniciales
+        async function loadInitialMarkers() {
+            try {
+                const response = await fetch('/api/initial-data');
+                const data = await response.json();
+                
+                map.setView(data.center, 8);
+                
+                data.schools.forEach(school => {
+                    if (!school.latitud || !school.longitud) return;
+
+                    const markerId = school.codigo || school.nombre;
+                    schoolsData[markerId] = { ...school, status: 'pending' };
+
+                    const marker = L.marker([school.latitud, school.longitud], {
+                        icon: grayIcon,
+                        title: school.nombre
+                    });
+
+                    const popup = L.popup().setContent(createPopupContent(school));
+                    marker.bindPopup(popup);
+
+                    marker.addTo(map);
+                    markers[markerId] = marker;
+                });
+                
+                updateStats();
+            } catch (error) {
+                console.error('Error al cargar datos iniciales:', error);
+            }
+        }
+
+        // Actualizar estados de conectividad
+        async function updateSchoolsStatus() {
+            if (isLoading) return;
+            
+            const reloadBtn = document.getElementById('reloadBtn');
+            reloadBtn.disabled = true;
+            reloadBtn.querySelector('svg').classList.add('loading');
+            isLoading = true;
+
+            try {
+                const response = await fetch('/api/status-updates');
+                const data = await response.json();
+                
+                data.updates.forEach(update => {
+                    const markerId = update.codigo || update.nombre;
+                    const marker = markers[markerId];
+                    const school = schoolsData[markerId];
+                    
+                    if (marker && school) {
+                        const status = update.online ? 'online' : 'offline';
+                        const markerIcon = update.online ? greenIcon : redIcon;
+                        
+                        schoolsData[markerId].status = status;
+                        marker.setIcon(markerIcon);
+                        marker.getPopup().setContent(createPopupContent(school, status));
+                        
+                        if (marker.getPopup().isOpen()) {
+                            marker.getPopup().update();
+                        }
+                    }
+                });
+                
+                updateStats();
+            } catch (error) {
+                console.error('Error al actualizar estados:', error);
+            } finally {
+                reloadBtn.disabled = false;
+                reloadBtn.querySelector('svg').classList.remove('loading');
+                isLoading = false;
+            }
+        }
+
+        // Event Listeners
+        document.getElementById('reloadBtn').addEventListener('click', updateSchoolsStatus);
+
+        // Inicialización
+    loadInitialMarkers().then(() => {
+    updateSchoolsStatus();
+    
+    // Actualizaciones periódicas cada 30 segundos
+        setInterval(updateSchoolsStatus, 30000);
+        });
+    </script>
+</body>
+</html>
